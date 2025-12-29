@@ -1,0 +1,5 @@
+#Secrets
+.env
+
+#Python virtual environments
+.venv

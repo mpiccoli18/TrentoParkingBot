@@ -1,8 +1,12 @@
 import asyncio
-import redis.asyncio as aioredis     # Async version of the Redis client
-import httpx        # Modern async HTTP client for API calls
+import os
+import httpx  # Modern async HTTP client for API calls
+import redis.asyncio as aioredis  # Async version of the Redis client
+from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler
 
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 REDIS_URL = "redis://localhost"
 ODH_API_URL = "https://mobility.api.opendatahub.com/v2/flat,node/ParkingStation"
 FETCH_INTERVAL = 1800  # 30 minutes in seconds
@@ -39,7 +43,7 @@ async def start_handler(update, context):
 async def main():
     redis = await aioredis.from_url("redis://localhost", decode_responses=True)
 
-    application = Application.builder().token("8581484431:AAH5KmReRZ7rkiNtIrvrrMqu12AN8YOgrSA").build()
+    application = Application.builder().token(TOKEN).build()
     application.bot_data['redis'] = redis
     application.add_handler(CommandHandler("start", start_handler))
 
