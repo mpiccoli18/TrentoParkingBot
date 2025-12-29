@@ -38,7 +38,7 @@ async def find_parking_basedcom(update, context):
         cached_data = await redis.get(cache_key)
     if cached_data:
         # Process and send the data back to user
-        await update.message.reply_text(f"🅿️ Available spots in {city_name}: ...")
+        await update.message.reply_text(f"🅿️ Available spots in {city_name}: {cached_data}")
     else:
         await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
 
