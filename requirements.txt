@@ -1,0 +1,4 @@
+python-dotenv
+httpx
+redis
+python-telegram-bot==20.*

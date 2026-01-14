@@ -222,7 +222,7 @@ def format_bolzano_message(raw_json_str):
             i for i in items
             if i.get('ttype') == "Instantaneous"
                and i.get('tname') == "free"
-               and ("2025" or "2026") in str(i.get('mvalidtime'))
+               and any(y in str(i.get("mvalidtime", "")) for y in ("2025", "2026"))
         ]
 
         if not parking:
@@ -282,16 +282,25 @@ async def find_parking_basedcom(update, context):
     if city_name == "Bolzano - Bozen":
         cache_key = "parking_data_bolzano"
         raw_data = await redis.get(cache_key)
+
+        if not raw_data:
+            await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
+            return
         clean_message = format_bolzano_message(raw_data)
         await update.message.reply_text(clean_message, parse_mode='HTML')
+        return
     elif city_name == "Trento":
         cache_key = "parking_data_trento"
         raw_data = await redis.get(cache_key)
+        if not raw_data:
+            await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
+            return
+
         clean_message = format_trento_message(raw_data)
         await update.message.reply_text(clean_message, parse_mode='HTML')
-    if not raw_data:
-        await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
-
+        return
+    else:
+        await update.message.reply_text("Unknown city.")
 
 # --- FUNCTION THAT UPDATES REDIS DB EVERY 30 MINUTES  ---
 async def fetch_data_periodically(redis):
@@ -313,7 +322,7 @@ async def fetch_data_periodically(redis):
                         print(f"✅ Updated cache for {city_name}")
                         #print(f"{response.text}")
                     else:
-                        print(f"❌ Status error: {response.status.code}")
+                        print(f"❌ Status error: {response.status_code}")
                 except Exception as e:
                     print(f"❌ Error Fetching {city_name}: {e}")
 
