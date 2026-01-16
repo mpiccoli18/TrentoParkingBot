@@ -1,8 +1,9 @@
+import asyncio
 import os, json, math, re
 from datetime import datetime
 from dotenv import load_dotenv
-
-import redis.asyncio as aioredis
+from redis import asyncio as aioredis
+from Adapter import RedisAdapter as RedisAda
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, ContextTypes, filters
@@ -153,14 +154,18 @@ def format_results(title, results, user_lat, user_lon, limit=10):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Hi! Use:\n"
-        "/findparkingTN to search in Trento\n"
-        "/findparkingBZ to search in Bolzano/Bozen\n\n"
-        "Then share your location 📍 so I can sort by nearest."
+        "Hello, I am your personal Parking Bot!👋\n"
+        "I can find the nearest parking spots in the province of Trento or Bolzano. Cool right?\n"
+        "To start searching the perfect spot, use the following commands:\n"
+        "- /findparkingTN to search the nearest parking spots in Trento\n"
+        "- /findparkingBZ to search the nearest parking spots in Bolzano - Bozen\n\n"
+        "Then share your location 📍 and wait for my response."
     )
+    await RedisAda.start()
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
+        "Here's the list of all available commands you can use:\n"
         "/start\n"
         "/help\n"
         "/findparkingTN\n"
@@ -181,7 +186,7 @@ async def findparking_tn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def findparking_bz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["city"] = "bolzano"
     await update.message.reply_text(
-        "Send your location to find nearby parking in Bolzano/Bozen:",
+        "Send your location to find nearby parking in Bolzano - Bozen:",
         reply_markup=ask_location_markup()
     )
 
@@ -219,6 +224,25 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def setup(app: Application):
     redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
     app.bot_data["redis"] = redis
+
+    async with app:
+        #   await app.start()
+        #await app.updater.start_polling()
+
+        print("🚀 Bot is starting and Fetcher is scheduled...")
+
+        try:
+            await asyncio.gather(
+                RedisAda.fetch_data_periodically(redis),     #Fetch every 5 minutes the data
+                asyncio.Event().wait()                       #Waits for the calls from the bot
+            )
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            print("🛑 Shutting down...")
+        finally:
+            # Cleanly stop the bot before the loop closes
+            await app.updater.stop()
+            await app.stop()
+            await redis.aclose()
 
 def main():
     app = Application.builder().token(TOKEN).post_init(setup).build()
