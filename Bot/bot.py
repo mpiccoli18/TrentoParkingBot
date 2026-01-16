@@ -1,5 +1,6 @@
 import asyncio
 import os, json, math, re
+import httpx
 from datetime import datetime
 from dotenv import load_dotenv
 from redis import asyncio as aioredis
@@ -125,6 +126,24 @@ def parse_bolzano_parks(raw_json_str: str):
 
 # ----------------- formatting -----------------
 
+def pretty_updated(val):
+    if val is None or val == "":
+        return "unknown"
+
+    # unix timestamp like 1768491063
+    try:
+        if isinstance(val, (int, float)) or (isinstance(val, str) and val.isdigit()):
+            ts = int(val)
+            # if milliseconds, convert to seconds
+            if ts > 10_000_000_000:
+                ts //= 1000
+            return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        pass
+
+    # otherwise keep original (Bolzano often gives a readable string already)
+    return str(val)
+
 def format_results(title, results, user_lat, user_lon, limit=10):
     lines = [f"<b>{title}</b>"]
     for r in results[:limit]:
@@ -144,7 +163,7 @@ def format_results(title, results, user_lat, user_lon, limit=10):
         lines.append(
             f"\n🟢 <b>{name}</b>{dist_txt}\n"
             f"├ Free spots: <b>{free_txt}</b>\n"
-            f"├ Updated: {updated}\n"
+            f"├ Updated: {pretty_updated(updated)}\n"
             + (f"└ Location: <a href='{link}'>click here</a>\n" if link else "")
         )
 
@@ -161,16 +180,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "- /findparkingBZ to search the nearest parking spots in Bolzano - Bozen\n\n"
         "Then share your location 📍 and wait for my response."
     )
-    await RedisAda.start()
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Here's the list of all available commands you can use:\n"
-        "/start\n"
-        "/help\n"
-        "/findparkingTN\n"
-        "/findparkingBZ\n"
-        "/stop"
+        "/start - Start the bot\n"
+        "/help - Learn about what the commands do\n"
+        "/findparkingTN - Will present the nearest parking spots to you, in Trento, including information like distance, google maps direction, price, number of free spots, and when available, the website\n"
+        "/findparkingBZ - Will present the nearest parking spots to you, in Bolzano, including information like distance, google maps direction, price, number of free spots, and when available, the website\n"
+        "/stop - Stop the bot"
     )
 
 async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -190,59 +208,69 @@ async def findparking_bz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ask_location_markup()
     )
 
+
+async def fetch_live_raw(city: str) -> str:
+    # reuse the URLs already defined in RedisAdapter.py
+    if city == "trento":
+        url = RedisAda.TRENTO_API_URL
+    else:
+        url = RedisAda.BOLZANO_API_URL
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.text
+
+
 async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     city = context.user_data.get("city")
     if not city:
-        await update.message.reply_text("Use /findparkingTN or /findparkingBZ first 🙂")
+        await update.message.reply_text("Use /findparkingtn or /findparkingbz first 🙂")
         return
 
     redis = context.application.bot_data["redis"]
     key = CITY_TO_KEY[city]
-    raw = await redis.get(key)
 
-    if not raw:
-        await update.message.reply_text("Cache is updating. Try again in a minute.")
+    # 1) Try LIVE API first (primary)
+    try:
+        raw = await fetch_live_raw(city)
+        # write-through cache (backup for later)
+        await redis.set(key, raw)
+        source = "live"
+    except Exception:
+        # 2) If API fails, fallback to Redis cache
+        raw = await redis.get(key)
+        source = "cache" if raw else "none"
+
+    if source == "none":
+        await update.message.reply_text("Live API is down and no cached data is available yet.")
         return
 
     user_lat = update.message.location.latitude
     user_lon = update.message.location.longitude
+    suffix = "" if source == "live" else " (cached — API offline)"
 
     if city == "trento":
         parks = parse_trento_parks(raw)
         # keep only those with coords so distance works (optional)
         parks = [p for p in parks if p["lat"] is not None and p["lon"] is not None]
         parks.sort(key=lambda p: haversine_km(user_lat, user_lon, float(p["lat"]), float(p["lon"])))
-        msg = format_results("TRENTO — NEAREST PARKING", parks, user_lat, user_lon)
+        msg = format_results("TRENTO — NEAREST PARKING" + suffix, parks, user_lat, user_lon)
     else:
         parks = parse_bolzano_parks(raw)
         parks = [p for p in parks if p["lat"] is not None and p["lon"] is not None]
         parks.sort(key=lambda p: haversine_km(user_lat, user_lon, float(p["lat"]), float(p["lon"])))
-        msg = format_results("BOLZANO/BOZEN — NEAREST PARKING", parks, user_lat, user_lon)
+        msg = format_results("BOLZANO/BOZEN — NEAREST PARKING" + suffix, parks, user_lat, user_lon)
 
     await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
 
 async def setup(app: Application):
     redis = await aioredis.from_url(REDIS_URL, decode_responses=True)
     app.bot_data["redis"] = redis
+    
+    # start periodic cache refresh in background (backup only)
+    app.bot_data["fetch_task"] = asyncio.create_task(RedisAda.fetch_data_periodically(redis))
 
-    async with app:
-        #   await app.start()
-        #await app.updater.start_polling()
-
-        print("🚀 Bot is starting and Fetcher is scheduled...")
-
-        try:
-            await asyncio.gather(
-                RedisAda.fetch_data_periodically(redis),     #Fetch every 5 minutes the data
-                asyncio.Event().wait()                       #Waits for the calls from the bot
-            )
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            print("🛑 Shutting down...")
-        finally:
-            # Cleanly stop the bot before the loop closes
-            await app.updater.stop()
-            await app.stop()
-            await redis.aclose()
 
 def main():
     app = Application.builder().token(TOKEN).post_init(setup).build()
