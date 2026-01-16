@@ -222,7 +222,7 @@ def format_bolzano_message(raw_json_str):
             i for i in items
             if i.get('ttype') == "Instantaneous"
                and i.get('tname') == "free"
-               and ("2025" or "2026") in str(i.get('mvalidtime'))
+               and any(y in str(i.get("mvalidtime", "")) for y in ("2025", "2026"))
         ]
 
         if not parking:
@@ -282,18 +282,27 @@ async def find_parking_basedcom(update, context):
     if city_name == "Bolzano - Bozen":
         cache_key = "parking_data_bolzano"
         raw_data = await redis.get(cache_key)
+
+        if not raw_data:
+            await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
+            return
         clean_message = format_bolzano_message(raw_data)
         await update.message.reply_text(clean_message, parse_mode='HTML')
+        return
     elif city_name == "Trento":
         cache_key = "parking_data_trento"
         raw_data = await redis.get(cache_key)
+        if not raw_data:
+            await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
+            return
+
         clean_message = format_trento_message(raw_data)
         await update.message.reply_text(clean_message, parse_mode='HTML')
-    if not raw_data:
-        await update.message.reply_text(f"Sorry, data for {city_name} is currently updating.")
+        return
+    else:
+        await update.message.reply_text("Unknown city.")
 
-
-# --- FUNCTION THAT UPDATES REDIS DB EVERY 30 MINUTES  ---
+# --- FUNCTION THAT UPDATES REDIS DB EVERY 5 MINUTES  ---
 async def fetch_data_periodically(redis):
     while True:
         async with httpx.AsyncClient() as client:
@@ -313,49 +322,9 @@ async def fetch_data_periodically(redis):
                         print(f"✅ Updated cache for {city_name}")
                         #print(f"{response.text}")
                     else:
-                        print(f"❌ Status error: {response.status.code}")
+                        print(f"❌ Status error: {response.status_code}")
                 except Exception as e:
                     print(f"❌ Error Fetching {city_name}: {e}")
 
-        # Sleep for 2 minutes without stopping the rest of the script
+        # Sleep for 5 minutes without stopping the rest of the script
         await asyncio.sleep(FETCH_INTERVAL)
-
-# FUNCTION FOR LISTENING TO THE BOT ---
-async def start_handler(update, context):
-    redis = context.application.bot_data['redis']
-    cached_data = await redis.get("parking_data_trento")
-
-    if cached_data:
-        await update.message.reply_text("Here is the latest (cached) parking info!")
-    else:
-        await update.message.reply_text("Data is currently unavailable. Try again in a moment.")
-
-async def main():
-    redis = await aioredis.from_url("redis://localhost", decode_responses=True)
-
-    application = Application.builder().token(TOKEN).build()
-    application.bot_data['redis'] = redis
-    application.add_handler(CommandHandler("start", start_handler))
-    application.add_handler(CommandHandler(list(CITY_MAP.keys()), find_parking_basedcom))
-
-    async with application:
-        await application.start()
-        await application.updater.start_polling()
-
-        print("🚀 Bot is starting and Fetcher is scheduled...")
-
-        try:
-            await asyncio.gather(
-                fetch_data_periodically(redis),     #Fetch every 5 minutes the data
-                asyncio.Event().wait()              #Waits for the calls from the bot
-            )
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            print("🛑 Shutting down...")
-        finally:
-            # Cleanly stop the bot before the loop closes
-            await application.updater.stop()
-            await application.stop()
-            await redis.aclose()
-
-if __name__ == '__main__':
-    asyncio.run(main())
