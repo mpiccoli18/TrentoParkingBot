@@ -89,40 +89,59 @@ def parse_bolzano_parks(raw_json_str: str):
     data = json.loads(raw_json_str)  # dict with "data":[...]
     items = data.get("data", [])
 
-    # aggregate by parking station code: keep "free" measurement + metadata
     by_code = {}
     for it in items:
-        # free spots only
-        if (it.get("tname") or "").lower() != "free":
+        # keep only "free" measurements
+        if (it.get("tname") or "").lower() != "free" and (it.get("tdescription") or "").lower() != "free":
             continue
 
-        scode = it.get("scode")
+        # code
+        scode = it.get("scode") or it.get("pcode") or it.get("pcode", "")
+        if isinstance(scode, str) and scode.endswith("_facility"):
+            scode = scode.replace("_facility", "")
         if not scode:
             continue
 
-        coord = it.get("scoordinate") or {}
+        # coordinates (prefer pcoordinate)
+        coord = it.get("pcoordinate") or it.get("scoordinate") or {}
         lat = coord.get("y")
         lon = coord.get("x")
 
-        md = it.get("smetadata") or {}
-        name = md.get("name") or md.get("title") or scode
-        info = md.get("address") or md.get("info") or ""
+        # metadata / name (prefer standard_name then pname)
+        pmeta = it.get("pmetadata") or {}
+        smeta = it.get("smetadata") or {}
+        name = (
+            pmeta.get("standard_name")
+            or smeta.get("standard_name")
+            or it.get("pname")
+            or it.get("sname")
+            or pmeta.get("name_it")
+            or smeta.get("name_it")
+            or scode
+        )
 
         free = it.get("mvalue")
-        updated = it.get("mvalidtime") or ""
+        updated = it.get("mvalidtime") or it.get("_timestamp") or it.get("mtransactiontime") or ""
+
+        # always give a usable map link (Bolzano often doesn't provide one)
+        link = ""
+        if lat is not None and lon is not None:
+            link = f"https://www.google.com/maps?q={lat},{lon}"
+
+        cap = pmeta.get("capacity") or smeta.get("capacity")
 
         by_code[scode] = {
             "name": name,
             "free": free,
+            "cap": cap,
             "updated": updated,
-            "info": info,
             "lat": lat,
             "lon": lon,
-            # You can keep website/pricing if you already have a map
-            "link": md.get("url") or ""
+            "link": link
         }
 
     return list(by_code.values())
+
 
 # ----------------- formatting -----------------
 
@@ -131,20 +150,25 @@ def pretty_updated(val):
         return "unknown"
 
     # unix timestamp like 1768491063
-    try:
-        if isinstance(val, (int, float)) or (isinstance(val, str) and val.isdigit()):
+    if isinstance(val, (int, float)) or (isinstance(val, str) and val.isdigit()):
+        try:
             ts = int(val)
             # if milliseconds, convert to seconds
             if ts > 10_000_000_000:
                 ts //= 1000
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        pass
-
+        except Exception:
+            pass
+    
+    if isinstance(val, str):
+        s = val.replace("T", " ")
+        s = s.split(".")[0]           # remove .000
+        s = s.replace("+0000", "")    # remove timezone suffix
+        return s.strip()
     # otherwise keep original (Bolzano often gives a readable string already)
     return str(val)
 
-def format_results(title, results, user_lat, user_lon, limit=10):
+def format_results(title, results, user_lat, user_lon, limit=5):
     lines = [f"<b>{title}</b>"]
     for r in results[:limit]:
         name = r["name"]
