@@ -4,11 +4,9 @@ import json
 import httpx                                # Modern async HTTP client for API calls
 import redis.asyncio as aioredis            # Async version of the Redis client
 from dotenv import load_dotenv
-from telegram.ext import Application, CommandHandler
 from datetime import datetime
 
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
 REDIS_URL = "redis://localhost"
 BOLZANO_API_URL = "https://mobility.api.opendatahub.com/v2/flat,node/ParkingStation/*/latest?limit=-1&where=smetadata.municipality.eq.%22Bolzano%20-%20Bozen%22&sactive.eq.true"
 TRENTO_API_URL = "https://parcheggi.comune.trento.it/static/services/registry_parks.json"
@@ -268,6 +266,8 @@ def format_bolzano_message(raw_json_str):
     except Exception as e:
         return f"⚠️ Data Processing Error: {str(e)}"
 
+
+"""
 # --- FUNCTION THAT DISTINGUISH THE CITY FROM THE COMMAND ---
 
 async def find_parking_basedcom(update, context):
@@ -301,6 +301,8 @@ async def find_parking_basedcom(update, context):
         return
     else:
         await update.message.reply_text("Unknown city.")
+
+"""
 
 # --- FUNCTION THAT UPDATES REDIS DB EVERY 5 MINUTES  ---
 async def fetch_data_periodically(redis):
