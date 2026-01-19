@@ -53,35 +53,85 @@ def parse_coords_from_gmaps(url: str):
 
     return None, None
 
+def parse_coords_from_geom(geom: str):
+    # Trento gives "POINT(lon lat)"
+    if not geom:
+        return None, None
+    m = re.search(r"POINT\(([-\d.]+)\s+([-\d.]+)\)", geom)
+    if not m:
+        return None, None
+    lon = float(m.group(1))
+    lat = float(m.group(2))
+    return lat, lon
+
+def normalize_url(u: str) -> str:
+    if not u:
+        return ""
+    u = u.strip()
+    if u.startswith("http://") or u.startswith("https://"):
+        return u
+    return "https://" + u
+
+
 # ----------------- parsing Trento -----------------
 
 def parse_trento_parks(raw_json_str: str):
     parks = json.loads(raw_json_str)  # list
     out = []
+
     for p in parks:
+        # Optional: keep only car park parkings (skip bike etc.)
+        # If you want to keep everything, comment the next 2 lines:
+        if p.get("type") != "park":
+            continue
+
         name = p.get("name", "Unknown")
         free = p.get("freeslots")
         cap = p.get("capacity")
         updated = p.get("updated_at") or p.get("update") or ""
-        gmaps = p.get("gmaps") or p.get("location") or ""
+        gmaps = p.get("gmaps") or ""
+        website = p.get("website") or ""
+        regulation = (p.get("regulation") or "").lower()
+        address = p.get("address") or ""
 
-        # try direct fields first
+        # Fee label (simple heuristic like in your adapter formatting)
+        if "gratuito" in regulation or "free" in regulation:
+            fee_type = "🆓 Free"
+        elif "disco orario" in regulation:
+            fee_type = "🕒 Limited time"
+        else:
+            fee_type = "💰 Paid"
+
+        # coords: try explicit fields, then gmaps, then geom "POINT(lon lat)"
         lat = p.get("lat") or p.get("latitude")
         lon = p.get("lon") or p.get("longitude")
 
         if lat is None or lon is None:
             lat, lon = parse_coords_from_gmaps(gmaps)
 
+        if lat is None or lon is None:
+            lat, lon = parse_coords_from_geom(p.get("geom"))
+
+        # if no gmaps, build a Google Maps link from coords
+        link = gmaps
+        if not link and lat is not None and lon is not None:
+            link = f"https://www.google.com/maps?q={lat},{lon}"
+
         out.append({
             "name": name,
             "free": free,
             "cap": cap,
             "updated": updated,
-            "link": gmaps,
             "lat": lat,
-            "lon": lon
+            "lon": lon,
+            "link": link,
+            "fee_type": fee_type,
+            "website": website,
+            "note": address,
         })
+
     return out
+
 
 # ----------------- parsing Bolzano (ODH) -----------------
 
@@ -90,15 +140,19 @@ def parse_bolzano_parks(raw_json_str: str):
     items = data.get("data", [])
 
     by_code = {}
+
     for it in items:
         # keep only "free" measurements
         if (it.get("tname") or "").lower() != "free" and (it.get("tdescription") or "").lower() != "free":
             continue
 
-        # code
-        scode = it.get("scode") or it.get("pcode") or it.get("pcode", "")
-        if isinstance(scode, str) and scode.endswith("_facility"):
+        scode = it.get("scode") or it.get("pcode") or ""
+        scode = str(scode)
+
+        # normalize pcode like "105_facility" -> "105"
+        if scode.endswith("_facility"):
             scode = scode.replace("_facility", "")
+
         if not scode:
             continue
 
@@ -107,10 +161,10 @@ def parse_bolzano_parks(raw_json_str: str):
         lat = coord.get("y")
         lon = coord.get("x")
 
-        # metadata / name (prefer standard_name then pname)
         pmeta = it.get("pmetadata") or {}
         smeta = it.get("smetadata") or {}
-        name = (
+
+        api_name = (
             pmeta.get("standard_name")
             or smeta.get("standard_name")
             or it.get("pname")
@@ -123,21 +177,43 @@ def parse_bolzano_parks(raw_json_str: str):
         free = it.get("mvalue")
         updated = it.get("mvalidtime") or it.get("_timestamp") or it.get("mtransactiontime") or ""
 
-        # always give a usable map link (Bolzano often doesn't provide one)
+        # default map link from coords
         link = ""
         if lat is not None and lon is not None:
             link = f"https://www.google.com/maps?q={lat},{lon}"
 
         cap = pmeta.get("capacity") or smeta.get("capacity")
 
+        # ---- ENRICH using adapter map (your static pricing/links) ----
+        pricing = RedisAda.BZ_PRICING_MAP.get(scode, {})
+
+        name = pricing.get("name") or api_name
+        fee_type = pricing.get("fee_type") or ""
+        day_rate = pricing.get("day_rate") or ""
+        night_rate = pricing.get("night_rate") or ""
+        max_24h = pricing.get("max_24h") or ""
+        website = pricing.get("website") or ""
+        note = pricing.get("note") or ""
+
+        # prefer the curated Google Maps link from pricing map if present
+        if pricing.get("maps"):
+            link = pricing["maps"]
+
         by_code[scode] = {
+            "scode": scode,
             "name": name,
             "free": free,
             "cap": cap,
             "updated": updated,
             "lat": lat,
             "lon": lon,
-            "link": link
+            "link": link,
+            "fee_type": fee_type,
+            "day_rate": day_rate,
+            "night_rate": night_rate,
+            "max_24h": max_24h,
+            "website": website,
+            "note": note,
         }
 
     return list(by_code.values())
@@ -163,16 +239,18 @@ def pretty_updated(val):
     if isinstance(val, str):
         s = val.replace("T", " ")
         s = s.split(".")[0]           # remove .000
-        s = s.replace("+0000", "")    # remove timezone suffix
+        s = s.replace("+0000", "").replace("Z", "")    # remove timezone suffix
         return s.strip()
     # otherwise keep original (Bolzano often gives a readable string already)
     return str(val)
 
-def format_results(title, results, user_lat, user_lon, limit=5):
+def format_results(title, results, user_lat, user_lon, limit=10):
     lines = [f"<b>{title}</b>"]
+
     for r in results[:limit]:
-        name = r["name"]
+        name = r.get("name", "Unknown")
         free = r.get("free")
+        cap = r.get("cap")
         updated = r.get("updated", "")
         link = r.get("link", "")
 
@@ -182,16 +260,52 @@ def format_results(title, results, user_lat, user_lon, limit=5):
             d = haversine_km(user_lat, user_lon, float(lat), float(lon))
             dist_txt = f" — <i>{d:.2f} km</i>"
 
-        free_txt = "?" if free is None else str(free)
+        # traffic-light icon based on free spots
+        if free is None:
+            icon = "⚪"
+        else:
+            try:
+                f = float(free)
+                icon = "🟢" if f > 30 else ("🟠" if f > 0 else "🔴")
+            except Exception:
+                icon = "⚪"
 
-        lines.append(
-            f"\n🟢 <b>{name}</b>{dist_txt}\n"
-            f"├ Free spots: <b>{free_txt}</b>\n"
-            f"├ Updated: {pretty_updated(updated)}\n"
-            + (f"└ Location: <a href='{link}'>click here</a>\n" if link else "")
-        )
+        free_txt = "?" if free is None else str(int(free)) if isinstance(free, (int, float)) else str(free)
+        cap_txt = "" if cap in (None, "", "??") else f" of {cap}"
+
+        # Build detail rows (we’ll make the last one start with └)
+        detail = []
+        detail.append(f"Free spots: <b>{free_txt}</b>{cap_txt}")
+        if r.get("fee_type"):
+            detail.append(f"Type: {r['fee_type']}")
+        if r.get("day_rate"):
+            detail.append(f"Day rate: {r['day_rate']}")
+        if r.get("night_rate"):
+            detail.append(f"Night rate: {r['night_rate']}")
+        if r.get("max_24h"):
+            detail.append(f"Max 24h: {r['max_24h']}")
+        detail.append(f"Updated: {pretty_updated(updated)}")
+
+        if r.get("website"):
+            w = r["website"]
+            detail.append(f"Website: <a href='{normalize_url(w)}'>{w}</a>")
+
+        if r.get("note"):
+            detail.append(f"Info: {r['note']}")
+
+        if link:
+            detail.append(f"Location: <a href='{normalize_url(link)}'>click here</a>")
+
+        # render with ├ / └
+        rendered = []
+        for i, row in enumerate(detail):
+            prefix = "└" if i == len(detail) - 1 else "├"
+            rendered.append(f"{prefix} {row}")
+
+        lines.append(f"\n{icon} <b>{name}</b>{dist_txt}\n" + "\n".join(rendered))
 
     return "\n".join(lines)
+
 
 # ----------------- telegram handlers -----------------
 
@@ -284,7 +398,7 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parks = parse_bolzano_parks(raw)
         parks = [p for p in parks if p["lat"] is not None and p["lon"] is not None]
         parks.sort(key=lambda p: haversine_km(user_lat, user_lon, float(p["lat"]), float(p["lon"])))
-        msg = format_results("BOLZANO/BOZEN — NEAREST PARKING" + suffix, parks, user_lat, user_lon)
+        msg = format_results("BOLZANO/BOZEN — NEAREST PARKING" + suffix, parks, user_lat, user_lon, limit=5)
 
     await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
 
