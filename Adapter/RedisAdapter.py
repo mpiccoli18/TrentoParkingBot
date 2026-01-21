@@ -175,6 +175,8 @@ def format_trento_message(raw_json_str):
             free = p.get('freeslots', 0)
             total = p.get('capacity', '??')
             gmaps = p.get('gmaps', '??')
+            website = p.get('link', '??')
+            street = p.get('address', '??')
 
             # --- Payment logic ---
             reg = p.get('regulation', '').lower()
@@ -201,7 +203,10 @@ def format_trento_message(raw_json_str):
 
             message += f"{icon} <b>{name}</b>\n"
             message += f"├ Type: {fee_label}\n"
-            message += f"├ Free parking spaces: <code>{free}</code> of {total} (updated {updated_time})\n"
+            message += f"├ Free spots: <code>{free}</code> of {total} (updated {updated_time})\n"
+            message += f"├ Updated: {updated_time}\n"
+            message += f"├ Website: <a href=\"{website}\">{website}</a>\n"
+            message += f"├ Info: {street}</a>\n"
             message += f"└ Location: <a href=\"{gmaps}\">click here!</a> \n \n"
         return message
 
@@ -255,8 +260,12 @@ def format_bolzano_message(raw_json_str):
             })
 
             message += f"{icon} <b>{name}</b>\n"
-            message += f"├ Free parking spaces: <code>{int(free)}</code> of {total} (at {time_display})\n"
-            message += f"├ Rate: {price_info['day_rate']}\n"
+            message += f"├ Free spots: <code>{int(free)}</code> of {total}\n"
+            message += f"├ Type: {price_info['fee_type']}"
+            message += f"├ Day rate: {price_info['day_rate']}\n"
+            message += f"├ Night rate: {price_info['night_rate']}\n"
+            message += f"├ Max 24h: {price_info['max_24h']}\n"
+            message += f"├ Updated: {time_display}\n"
             message += f"├ Website: <a href=\"{price_info['website']}\">{price_info['website']}</a> \n"
             message += f"├ Location: <a href=\"{price_info['maps']}\">click here!</a> \n"
             message += f"└ Info: {price_info['note']}\n \n"
