@@ -130,7 +130,7 @@ BZ_PRICING_MAP = {
     }, # Tribunale
     "parking-bz:8:0": {
         "name": "Turist Parking",
-        "fee_type": "Free of charge",
+        "fee_type": "🆓 Free of charge",
         "day_rate": "N/A",
         "night_rate": "N/A",
         "max_24h": "N/A",
@@ -140,10 +140,10 @@ BZ_PRICING_MAP = {
     }, # Turist Parking
     "609883_0": {
         "name": "Waltherpark",
-        "fee_type": "N/A",
-        "day_rate": "N/A",
-        "night_rate": "N/A",
-        "max_24h": "N/A",
+        "fee_type": "💰 Paid",
+        "day_rate": "€4.50/h (06:00-20:00)",
+        "night_rate": "€1.00/h (20:00-06:00)",
+        "max_24h": "€ 24.00",
         "website": "waltherpark.com",
         "maps": "https://maps.app.goo.gl/gdCF4hbBycgKRsRn7",
         "note": "Piazza dell'Alto Adige"

@@ -90,7 +90,7 @@ def parse_trento_parks(raw_json_str: str):
         cap = p.get("capacity")
         updated = p.get("updated_at") or p.get("update") or ""
         gmaps = p.get("gmaps") or ""
-        website = p.get("website") or ""
+        website = p.get("link") or ""
         regulation = (p.get("regulation") or "").lower()
         address = p.get("address") or ""
 
@@ -294,7 +294,7 @@ def format_results(title, results, user_lat, user_lon, limit=10):
             detail.append(f"Info: {r['note']}")
 
         if link:
-            detail.append(f"Location: <a href='{normalize_url(link)}'>click here</a>")
+            detail.append(f"Location: <a href='{normalize_url(link)}'>click here!</a>")
 
         # render with ├ / └
         rendered = []
@@ -393,12 +393,12 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # keep only those with coords so distance works (optional)
         parks = [p for p in parks if p["lat"] is not None and p["lon"] is not None]
         parks.sort(key=lambda p: haversine_km(user_lat, user_lon, float(p["lat"]), float(p["lon"])))
-        msg = format_results("TRENTO — NEAREST PARKING" + suffix, parks, user_lat, user_lon)
+        msg = format_results("🅿️ TRENTO - LIVE PARKING STATUS" + suffix, parks, user_lat, user_lon)
     else:
         parks = parse_bolzano_parks(raw)
         parks = [p for p in parks if p["lat"] is not None and p["lon"] is not None]
         parks.sort(key=lambda p: haversine_km(user_lat, user_lon, float(p["lat"]), float(p["lon"])))
-        msg = format_results("BOLZANO/BOZEN — NEAREST PARKING" + suffix, parks, user_lat, user_lon, limit=5)
+        msg = format_results("🅿️ BOLZANO/BOZEN - LIVE PARKING STATUS" + suffix, parks, user_lat, user_lon, limit=5)
 
     await update.message.reply_text(msg, parse_mode="HTML", disable_web_page_preview=True)
 
