@@ -10,6 +10,8 @@ load_dotenv()
 REDIS_URL = "redis://localhost"
 BOLZANO_API_URL = "https://mobility.api.opendatahub.com/v2/flat,node/ParkingStation/*/latest?limit=-1&where=smetadata.municipality.eq.%22Bolzano%20-%20Bozen%22&sactive.eq.true"
 TRENTO_API_URL = "https://parcheggi.comune.trento.it/static/services/registry_parks.json"
+BOLZANO_API_URL_TEST = ""
+TRENTO_API_URL_TEST = ""
 FETCH_INTERVAL = 300  # 5 minutes in seconds
 CITY_MAP = {
     "findparkingtn": ("Trento", "Municipality of Trento"),
