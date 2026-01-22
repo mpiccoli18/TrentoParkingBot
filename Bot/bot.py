@@ -85,6 +85,7 @@ def parse_trento_parks(raw_json_str: str):
         if p.get("type") != "park":
             continue
 
+        id = p.get("id", "??")
         name = p.get("name", "Unknown")
         free = p.get("freeslots")
         cap = p.get("capacity")
@@ -117,6 +118,11 @@ def parse_trento_parks(raw_json_str: str):
         if not link and lat is not None and lon is not None:
             link = f"https://www.google.com/maps?q={lat},{lon}"
 
+        pricing = RedisAda.TN_PRICING_MAP.get(id, {})
+        day_rate = pricing.get("day_rate") or ""
+        night_rate = pricing.get("night_rate") or ""
+        max_24h = pricing.get("max_24h") or ""
+
         out.append({
             "name": name,
             "free": free,
@@ -126,6 +132,9 @@ def parse_trento_parks(raw_json_str: str):
             "lon": lon,
             "link": link,
             "fee_type": fee_type,
+            "day_rate": day_rate,
+            "night_rate": night_rate,
+            "max_24h": max_24h,
             "website": website,
             "note": address,
         })
@@ -390,7 +399,6 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if city == "trento":
         parks = parse_trento_parks(raw)
-        # keep only those with coords so distance works (optional)
         parks = [p for p in parks if p["lat"] is not None and p["lon"] is not None]
         parks.sort(key=lambda p: haversine_km(user_lat, user_lon, float(p["lat"]), float(p["lon"])))
         msg = format_results("🅿️ TRENTO - LIVE PARKING STATUS" + suffix, parks, user_lat, user_lon)

@@ -152,6 +152,53 @@ BZ_PRICING_MAP = {
     }
 }
 
+TN_PRICING_MAP = {
+    "203": {
+        "day_rate": "€1.60/h (08:00-19:30)",
+        "night_rate": "€0.80/h (19:30-08:00)",
+        "max_24h": "€20.00",
+    }, # Garage Autosilio P3
+    "204": {
+        "day_rate": "max 2hrs with parking disc",
+        "night_rate": "N/A",
+        "max_24h": "N/A",
+    }, # Parcheggio piazzale Sanseverino
+    "211": {
+        "day_rate": "€3.80 (1st hr), €3.20 (2nd hr), then €2.00/hr",
+        "night_rate": "N/A",
+        "max_24h": "€24.00",
+    }, # Garage Centro Europa
+    "212": {
+        "day_rate": "€2.80/h (1st hr), €0.90 every 20 minutes",
+        "night_rate": "€1.00/h (20:00-07:00)",
+        "max_24h": "€22.00",
+    }, # Garage Piazza Fiera
+    "213": {
+        "day_rate": "€1.50/h (07:00-20:00), in case you lose the ticket €25",
+        "night_rate": "N/A",
+        "max_24h": "N/A",
+    }, # Parcheggio Cittadella dello Studente
+    "408": {
+        "day_rate": "€0.50/h (all day)",
+        "night_rate": "N/A",
+        "max_24h": "€3.00",
+    }, # Parcheggio Santa Chiara
+    "78487": {
+        "day_rate": "N/A",
+        "night_rate": "N/A",
+        "max_24h": "N/A",
+    }, # Parcheggio Area ex Zuffo
+    "91722": {
+        "day_rate": "€0.80/h (07:00-20:30), free for less than 2hrs",
+        "night_rate": "€0.20/h (00:00-06:00), special fee €0.40h (06:00-07:00 and 20:30-23:59)",
+        "max_24h": "N/A",
+    }, # Garage Parcheggio Duomo
+    "91723": {
+        "day_rate": "€0.50/h (06:00-22:59), free for less that 2hrs",
+        "night_rate": "€0.50/h (23:00-06:00)",
+        "max_24h": "N/A",
+    }, # Parcheggio Via Monte Baldo
+}
 
 
 # --- FUNCTION THAT PARSE THE MESSAGE FOR THE USER IN ORDER TO BE READABLE (ONLY FOR TRENTO) ---
@@ -173,6 +220,7 @@ def format_trento_message(raw_json_str):
         )
 
         for p in sorted_parks:
+            id = p.get('id', '??')
             name = p.get('name', 'Unknown Parking')
             free = p.get('freeslots', 0)
             total = p.get('capacity', '??')
@@ -189,6 +237,13 @@ def format_trento_message(raw_json_str):
             else:
                 fee_label = "💰 Paid"
 
+            price_info = TN_PRICING_MAP.get(id,{
+                "fee_type": "💰 Paid",
+                "day_rate": "Rates on the site",
+                "maps": "Location unavailable",
+                "website": "",
+                "note": ""
+            } )
             # --- System check ---
             if p.get('offline') is True:
                 message += f"⚪ <b>{name}</b>\n└ <i>Status: Maintenance</i>\n\n"
@@ -205,6 +260,9 @@ def format_trento_message(raw_json_str):
 
             message += f"{icon} <b>{name}</b>\n"
             message += f"├ Type: {fee_label}\n"
+            message += f"├ Day rate: {price_info['day_rate']}\n"
+            message += f"├ Night rate: {price_info['night_rate']}\n"
+            message += f"├ Max 24h: {price_info['max_24h']}\n"
             message += f"├ Free spots: <code>{free}</code> of {total} (updated {updated_time})\n"
             message += f"├ Updated: {updated_time}\n"
             message += f"├ Website: <a href=\"{website}\">{website}</a>\n"
